@@ -15,49 +15,72 @@ import (
 )
 
 func main() {
+	// set up logger using GO's built-in slog package 
 	programLevel := new(slog.LevelVar)
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: programLevel}))
 	slog.SetDefault(logger)
 
+	// read required environment variables: where to authenticate token, download files, etc
 	integrationID := os.Getenv("INTEGRATION_ID")
 	logger.Info(integrationID)
 	outputDir := os.Getenv("OUTPUT_DIR")
-
-	// get input files
 	sessionToken := os.Getenv("SESSION_TOKEN")
 	apiHost := os.Getenv("PENNSIEVE_API_HOST")
 	apiHost2 := os.Getenv("PENNSIEVE_API_HOST2")
+
+	// makes a web request to the API to get the integration details
+	// integration contains details abou the dataset and package IDs to be downloaded
+	// the response would come back as raw data that needs to be parsed (see line below)
 	integrationResponse, err := getIntegration(apiHost2, integrationID, sessionToken)
 	if err != nil {
 		log.Fatalln(err)
 	}
+	fmt.Println("Printing intergration response")
 	fmt.Println(string(integrationResponse))
-	var integration Integration
+
+	// parse integration response
+	// use json.unmarshal to convert the raw response into structured format that the program can work with
+	var integration Integration // creates a variable "integration" of type "Integration" (customized later)
 	if err := json.Unmarshal(integrationResponse, &integration); err != nil {
 		logger.ErrorContext(context.Background(), err.Error())
 	}
+	fmt.Println("Printing intergration")
 	fmt.Println(integration)
 
+	// get presigned URLs for the package IDs listed in the integration (previsouly itegration only listed package IDs but not URLs)
 	manifest, err := getPresignedUrls(apiHost, getPackageIds(integration.PackageIDs), sessionToken)
 	if err != nil {
 		log.Fatalln(err)
 	}
+	fmt.Println("Printing manifest")
 	fmt.Println(string(manifest))
-	var payload Manifest
+
+	// parse manifest response to get a list of files with their names and download URLs
+	var payload Manifest // creates a variable "payload" of type "Manifest" (customized later)
 	if err := json.Unmarshal(manifest, &payload); err != nil {
 		logger.ErrorContext(context.Background(), err.Error())
 	}
+	fmt.Println("Printing payload.Data")
+	fmt.Println(payload.Data)
 
 	// copy files into input directory
-	fmt.Println(payload.Data)
+	// loop through the pasrsed manifest data and use wget to download each file using their filename and Url
 	for _, d := range payload.Data {
-		cmd := exec.Command("wget", "-v", "-O", d.FileName, d.Url)
-		cmd.Dir = outputDir
-		var out strings.Builder
+
+		// SZ ADDED FOR DEBUGGING - SEP 30 2025
+		// Print all available data for each file
+		fmt.Println("=== File Details ===")
+		fmt.Println("FileName:", d.FileName) 
+		fmt.Println("Path:", d.Path)
+		fmt.Println("===================")
+
+		cmd := exec.Command("wget", "-v", "-O", d.FileName, d.Url) // create a command for download 
+		cmd.Dir = outputDir // set the working dir to inputDir so the downladed files would go there
+		var out strings.Builder // creates a variable "out" with property as "strings.Builder" - like a notepad where you can keep adding text 
 		var stderr strings.Builder
 		cmd.Stdout = &out
 		cmd.Stderr = &stderr
-		err := cmd.Run()
+		err := cmd.Run() // execute the command
 
 		// Print stdout content
 		stdoutContent := out.String()
